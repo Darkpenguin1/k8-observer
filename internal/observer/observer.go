@@ -57,6 +57,8 @@ func New(inCluster bool) (*Observer, error) {
 
 func (o *Observer) Run() {
 	// register handlers and start the informer
+	deploymentInformer := o.factory.Apps().V1().Deployments().Informer()
+	
 }
 
 func (o *Observer) handleDeploymentAdd() {
