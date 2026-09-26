@@ -2,7 +2,7 @@ package main
 
 import (
 	"log"
-	
+
 	"flag"
 	"github.com/Darkpenguin1/k8-observer/internal/observer"
 	"github.com/Darkpenguin1/k8-observer/internal/server"
@@ -12,7 +12,6 @@ import (
 	"os/signal"
 	"syscall"
 )
-
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -38,12 +37,12 @@ func main() {
 
 	completed := 0
 	select {
-		case <-ctx.Done(): // Ctrl+C or SIGTERM
-		case r := <-results: // one component stopped first
-			completed++
-			if r.err != nil {
-				log.Printf("%s: %v", r.name, r.err)
-			}
+	case <-ctx.Done(): // Ctrl+C or SIGTERM
+	case r := <-results: // one component stopped first
+		completed++
+		if r.err != nil {
+			log.Printf("%s: %v", r.name, r.err)
+		}
 	}
 
 	stop() // tell the other component to stop
@@ -51,7 +50,7 @@ func main() {
 	for completed < 2 {
 		r := <-results
 		completed++
-		if r.err != nil && ctx.Err() == nil {
+		if r.err != nil {
 			log.Printf("%s: %v", r.name, r.err)
 		}
 	}
