@@ -6,12 +6,16 @@ import (
 
 	// corev1 "k8s.io/api/core/v1"
 	// metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"os"
 	"path/filepath"
+	"context"
+	"k8s.io/client-go/tools/cache"
+	"log"
 )
 
 type Observer struct {
@@ -55,16 +59,45 @@ func New(inCluster bool) (*Observer, error) {
 	}, nil
 }
 
-func (o *Observer) Run() {
-	// register handlers and start the informer
+func (o *Observer) Run(ctx context.Context) error {
 	deploymentInformer := o.factory.Apps().V1().Deployments().Informer()
-	
+
+	_, err := deploymentInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			deployment, ok := obj.(*appsv1.Deployment)
+			if !ok {
+				return
+			}
+			o.handleDeploymentAdd(deployment)
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			deployment, ok := newObj.(*appsv1.Deployment)
+			if !ok {
+				return
+			}
+			o.handleDeploymentUpdate(deployment)
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("register Deployment event handler: %w", err)
+	}
+
+	o.factory.Start(ctx.Done())
+
+	if !cache.WaitForCacheSync(ctx.Done(), deploymentInformer.HasSynced) {
+		return fmt.Errorf("Deployment cache did not sync: %w", ctx.Err())
+	}
+
+	<-ctx.Done()
+	return nil
 }
 
-func (o *Observer) handleDeploymentAdd() {
+func (o *Observer) handleDeploymentAdd(d *appsv1.Deployment) {
 	// call describeDeployment, then log
+	log.Printf("Deployment added: %s", describeDeployment(d))
 }
 
-func (o *Observer) handleDeploymentUpdate() {
+func (o *Observer) handleDeploymentUpdate(d *appsv1.Deployment) {
 	// call describeDeployment on the new object, then log
+	log.Printf("Deployment added: %s", describeDeployment(d))
 }
