@@ -3,9 +3,6 @@ package observer
 import (
 	"fmt"
 	"time"
-
-	// corev1 "k8s.io/api/core/v1"
-	// metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"context"
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/client-go/informers"
@@ -77,6 +74,13 @@ func (o *Observer) Run(ctx context.Context) error {
 			}
 			o.handleDeploymentUpdate(deployment)
 		},
+		DeleteFunc: func(obj interface{}) {
+			deployment, ok := obj.(*appsv1.Deployment)
+			if !ok {
+				return
+			}
+			o.handleDeploymentDelete(deployment)
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("register Deployment event handler: %w", err)
@@ -100,4 +104,9 @@ func (o *Observer) handleDeploymentAdd(d *appsv1.Deployment) {
 func (o *Observer) handleDeploymentUpdate(d *appsv1.Deployment) {
 	// call describeDeployment on the new object, then log
 	log.Printf("Deployment added: %s", describeDeployment(d))
+}
+
+func (o *Observer) handleDeploymentDelete(d *appsv1.Deployment) {
+	// call describeDeployment, then log
+	log.Printf("Deployment deleted: %s", describeDeployment(d))
 }

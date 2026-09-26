@@ -1,0 +1,9 @@
+# Build output
+/bin/
+/dist/
+*.exe
+
+# Local configuration and secrets
+.env
+.env.*
+kubeconfig
