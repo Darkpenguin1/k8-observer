@@ -1,24 +1,29 @@
 package observer
 
 import (
-	"fmt"
-	"time"
 	"context"
-	appsv1 "k8s.io/api/apps/v1"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
-	"log"
-	"os"
-	"path/filepath"
 )
 
 type Observer struct {
-	// informer and anything it needs to run
-	factory   informers.SharedInformerFactory
-	clientset *kubernetes.Clientset
+	factory informers.SharedInformerFactory
+}
+
+// informerRegistration keeps Run independent of any particular Kubernetes
+// resource. New resource observers only need to register an informer and give
+// Run a name to use in startup errors.
+type informerRegistration struct {
+	name     string
+	informer cache.SharedIndexInformer
 }
 
 func New(inCluster bool) (*Observer, error) {
@@ -51,62 +56,28 @@ func New(inCluster bool) (*Observer, error) {
 
 	factory := informers.NewSharedInformerFactory(clientset, 10*time.Minute)
 	return &Observer{
-		factory:   factory,
-		clientset: clientset,
+		factory: factory,
 	}, nil
 }
 
 func (o *Observer) Run(ctx context.Context) error {
-	deploymentInformer := o.factory.Apps().V1().Deployments().Informer()
-
-	_, err := deploymentInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			deployment, ok := obj.(*appsv1.Deployment)
-			if !ok {
-				return
-			}
-			o.handleDeploymentAdd(deployment)
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			deployment, ok := newObj.(*appsv1.Deployment)
-			if !ok {
-				return
-			}
-			o.handleDeploymentUpdate(deployment)
-		},
-		DeleteFunc: func(obj interface{}) {
-			deployment, ok := obj.(*appsv1.Deployment)
-			if !ok {
-				return
-			}
-			o.handleDeploymentDelete(deployment)
-		},
-	})
+	deployment, err := o.registerDeploymentInformer()
 	if err != nil {
-		return fmt.Errorf("register Deployment event handler: %w", err)
+		return err
 	}
+	registrations := []informerRegistration{deployment}
 
 	o.factory.Start(ctx.Done())
 
-	if !cache.WaitForCacheSync(ctx.Done(), deploymentInformer.HasSynced) {
-		return fmt.Errorf("Deployment cache did not sync: %w", ctx.Err())
+	for _, registration := range registrations {
+		if !cache.WaitForCacheSync(ctx.Done(), registration.informer.HasSynced) {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("sync %s informer cache: %w", registration.name, err)
+			}
+			return fmt.Errorf("sync %s informer cache", registration.name)
+		}
 	}
 
 	<-ctx.Done()
 	return nil
-}
-
-func (o *Observer) handleDeploymentAdd(d *appsv1.Deployment) {
-	// call describeDeployment, then log
-	log.Printf("Deployment added: %s", describeDeployment(d))
-}
-
-func (o *Observer) handleDeploymentUpdate(d *appsv1.Deployment) {
-	// call describeDeployment on the new object, then log
-	log.Printf("Deployment added: %s", describeDeployment(d))
-}
-
-func (o *Observer) handleDeploymentDelete(d *appsv1.Deployment) {
-	// call describeDeployment, then log
-	log.Printf("Deployment deleted: %s", describeDeployment(d))
 }
