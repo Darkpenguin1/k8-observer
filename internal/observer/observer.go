@@ -61,11 +61,21 @@ func New(inCluster bool) (*Observer, error) {
 }
 
 func (o *Observer) Run(ctx context.Context) error {
-	deployment, err := o.registerDeploymentInformer()
-	if err != nil {
-		return err
+
+	registerFuncs := []func() (informerRegistration, error){
+		o.registerDeploymentInformer,
+		o.registerPodInformer,
+		o.registerEventInformer,
 	}
-	registrations := []informerRegistration{deployment}
+
+	registrations := make([]informerRegistration, 0, len(registerFuncs))
+	for _, register := range registerFuncs {
+		registration, err := register()
+		if err != nil {
+			return err
+		}
+		registrations = append(registrations, registration)
+	}
 
 	o.factory.Start(ctx.Done())
 
