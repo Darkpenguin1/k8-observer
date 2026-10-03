@@ -2,8 +2,6 @@ package observer
 
 import (
 	"fmt"
-	"log"
-
 	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/client-go/tools/cache"
 )
@@ -52,15 +50,15 @@ func deploymentFromDeletedObject(obj interface{}) (*appsv1.Deployment, bool) {
 }
 
 func (o *Observer) handleDeploymentAdd(d *appsv1.Deployment) {
-	log.Printf("Deployment added: %s", describeDeployment(d))
+	logResource("Added", "Deployment", describeDeployment(d))
 }
 
 func (o *Observer) handleDeploymentUpdate(d *appsv1.Deployment) {
-	log.Printf("Deployment updated: %s", describeDeployment(d))
+	logResource("Updated", "Deployment", describeDeployment(d))
 }
 
 func (o *Observer) handleDeploymentDelete(d *appsv1.Deployment) {
-	log.Printf("Deployment deleted: %s", describeDeployment(d))
+	logResource("Deleted", "Deployment", describeDeployment(d))
 }
 
 func describeDeployment(d *appsv1.Deployment) string {
