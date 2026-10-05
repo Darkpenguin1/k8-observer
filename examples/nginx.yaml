@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: observer-test-nginx
+  labels:
+    app: observer-test-nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: observer-test-nginx
+  template:
+    metadata:
+      labels:
+        app: observer-test-nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - name: http
+              containerPort: 80
