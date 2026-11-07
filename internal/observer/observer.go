@@ -54,7 +54,8 @@ func New(inCluster bool) (*Observer, error) {
 		return nil, fmt.Errorf("create Kubernetes client: %w", err)
 	}
 
-	factory := informers.NewSharedInformerFactory(clientset, 10*time.Minute)
+	factory := informers.NewSharedInformerFactory(clientset, 10*time.Minute) // default resync period / informer will relist objs even if nothing has changed to ensure cache consistency
+
 	return &Observer{
 		factory: factory,
 	}, nil

@@ -8,7 +8,8 @@ import (
 
 func (o *Observer) registerPodInformer() (informerRegistration, error) {
 	informer := o.factory.Core().V1().Pods().Informer()
-
+	 
+	// whole lotta type assertions
 	_, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod, ok := obj.(*corev1.Pod)
@@ -16,11 +17,22 @@ func (o *Observer) registerPodInformer() (informerRegistration, error) {
 				o.handlePodAdd(pod)
 			}
 		},
-		UpdateFunc: func(_, newObj interface{}) {
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			
+			oldPod, oldOk := oldObj.(*corev1.Pod)
 			pod, ok := newObj.(*corev1.Pod)
-			if ok {
-				o.handlePodUpdate(pod)
+			
+			if !oldOk || !ok{
+				return
 			}
+			detected := crashBackLoopDetected(oldPod, pod)
+			
+			for _, containerName := range detected {
+				description := fmt.Sprintf("%s/%s container=%s", pod.Namespace, pod.Name, containerName)
+				logResource("Detected", "CrashLoopBackOff", description)
+			}
+			o.handlePodUpdate(pod)
+			
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod, ok := podFromDeletedObject(obj)
