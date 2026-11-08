@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Darkpenguin1/k8-observer/internal/investigation"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -15,7 +16,8 @@ import (
 )
 
 type Observer struct {
-	factory informers.SharedInformerFactory
+	factory   informers.SharedInformerFactory
+	scheduler *investigation.Scheduler
 }
 
 // informerRegistration keeps Run independent of any particular Kubernetes
@@ -57,7 +59,8 @@ func New(inCluster bool) (*Observer, error) {
 	factory := informers.NewSharedInformerFactory(clientset, 10*time.Minute) // default resync period / informer will relist objs even if nothing has changed to ensure cache consistency
 
 	return &Observer{
-		factory: factory,
+		factory:   factory,
+		scheduler: investigation.NewScheduler(),
 	}, nil
 }
 
@@ -65,7 +68,9 @@ func (o *Observer) Run(ctx context.Context) error {
 
 	registerFuncs := []func() (informerRegistration, error){
 		o.registerDeploymentInformer,
-		o.registerPodInformer,
+		func() (informerRegistration, error) {
+			return o.registerPodInformer(ctx)
+		},
 		o.registerEventInformer,
 	}
 
@@ -78,6 +83,10 @@ func (o *Observer) Run(ctx context.Context) error {
 		registrations = append(registrations, registration)
 	}
 
+	workerCtx, cancelWorker := context.WithCancel(ctx)
+	defer cancelWorker()
+
+	go o.scheduler.Run(workerCtx)
 	o.factory.Start(ctx.Done())
 
 	for _, registration := range registrations {
