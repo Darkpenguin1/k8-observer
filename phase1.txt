@@ -1,0 +1,84 @@
+Phase 1: Pod Failure Filtering and Investigation Scheduler
+
+Summary
+
+Build one complete vertical slice for Pods before adding Deployment and Event
+rules. Informer callbacks synchronously detect meaningful state changes and
+submit normalized signals to a bounded, concurrent scheduler. Use client-go's
+typed rate-limiting workqueue for Kubernetes-standard deduplication, dirty
+requeue, retry, and shutdown behavior.
+
+Key Changes
+
+- Add a pure Pod filter that accepts old and new Pod state and returns zero or
+  more FailureSignal values.
+  - Initially detect ImagePullBackOff/ErrImagePull, CrashLoopBackOff,
+    unschedulable Pods, and terminal Failed Pods.
+  - Include regular and init-container failures.
+  - Emit signals for newly appearing failures or meaningful changes such as a
+    new exit code, restart count, or failure message.
+  - Ignore resyncs and unrelated updates whose relevant failure state did not
+    change.
+  - Inspect failing Pods during informer Add handling so pre-existing failures
+    are not missed.
+- Normalize failures around:
+  - InvestigationKey: resource UID, kind, normalized failure type, and optional
+    container name.
+  - FailureSignal: key plus namespace, resource name, observed time, reason,
+    message, and relevant state details.
+  - Keep timestamps out of the key; store them as signal metadata.
+- Introduce an independent scheduler package with:
+  - Configurable capacity, worker count, retry limit, and backoff.
+  - A Processor interface accepting a context and the latest FailureSignal.
+  - A nonblocking Enqueue result distinguishing accepted, coalesced, shutting
+    down, and capacity-rejected signals.
+  - A bounded admission map around the client-go typed rate-limiting queue.
+    Capacity limits distinct active keys, not duplicate observations.
+  - Latest-signal storage per key. Repeated signals update that value instead
+    of adding queue entries.
+  - Dirty requeue behavior so a signal changed during an investigation receives
+    exactly one follow-up investigation using the latest state.
+  - Fixed workers; never start a goroutine per informer event.
+  - Retry with exponential backoff for processor errors, stopping after the
+    configured attempt limit.
+  - Shutdown that rejects new work, cancels in-flight processing through
+    context, stops retry scheduling, and waits for workers.
+- Wire the observer so filtering remains synchronous and inexpensive while
+  investigations run concurrently.
+- Keep ordinary resource notification logs behind a -verbose-events flag.
+  Failure, rejection, retry-exhaustion, and investigation lifecycle logs remain
+  visible by default.
+- Add lightweight metric hooks or counters for accepted, coalesced, rejected,
+  started, succeeded, failed, retried, active, and queued work. Defer the
+  Prometheus endpoint to the later observability phase.
+
+Test Plan
+
+- Pod filtering:
+  - Running -> Running produces no signal.
+  - Running -> each supported failure produces the expected normalized signal.
+  - An unchanged failure produces no new signal.
+  - A meaningful change to the same failure produces an updated signal with the
+    same key.
+  - Existing failed Pods are detected on add.
+  - Multiple failing containers produce independent keys.
+- Scheduler:
+  - 500 concurrent submissions for one key result in one pending investigation.
+  - Updates arriving while processing cause one follow-up run with the latest
+    signal.
+  - Distinct keys run concurrently but never exceed the worker limit.
+  - Capacity rejects only brand-new keys and reports the rejection; existing
+    keys can still coalesce.
+  - Transient processor failures back off and stop at the retry limit.
+  - Cancellation reaches active processors and shutdown terminates all workers.
+- Run go test ./... and go test -race ./....
+
+Assumptions
+
+- Phase 1 implements Pod filtering only; Kubernetes Event rules come next,
+  followed by Deployment conditions once normal rollout behavior is clearly
+  separated from failure.
+- A temporary logging processor stands in for the Phase 2 evidence collector.
+- Queue-full behavior is nonblocking and visibly rejects new unique keys.
+- Deduplication is in-memory and resets when the observer restarts.
+- No investigations are triggered for Pod deletion in this first slice.

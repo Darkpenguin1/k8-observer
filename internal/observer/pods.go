@@ -9,18 +9,33 @@ import (
 func (o *Observer) registerPodInformer() (informerRegistration, error) {
 	informer := o.factory.Core().V1().Pods().Informer()
 
+	// whole lotta type assertions
 	_, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			pod, ok := obj.(*corev1.Pod)
-			if ok {
-				o.handlePodAdd(pod)
+
+			if !ok || pod == nil {
+				return
 			}
+
+			logCrashLoopDetections(nil, pod)
+
+			o.handlePodAdd(pod)
+
 		},
-		UpdateFunc: func(_, newObj interface{}) {
+		UpdateFunc: func(oldObj, newObj interface{}) {
+
+			oldPod, oldOk := oldObj.(*corev1.Pod)
 			pod, ok := newObj.(*corev1.Pod)
-			if ok {
-				o.handlePodUpdate(pod)
+
+			if !oldOk || oldPod == nil || !ok || pod == nil {
+				return
 			}
+
+			logCrashLoopDetections(oldPod, pod)
+
+			o.handlePodUpdate(pod)
+
 		},
 		DeleteFunc: func(obj interface{}) {
 			pod, ok := podFromDeletedObject(obj)
@@ -28,7 +43,6 @@ func (o *Observer) registerPodInformer() (informerRegistration, error) {
 				o.handlePodDelete(pod)
 			}
 		},
-
 	})
 
 	return informerRegistration{name: "Pod", informer: informer}, err
@@ -36,7 +50,7 @@ func (o *Observer) registerPodInformer() (informerRegistration, error) {
 
 func podFromDeletedObject(obj interface{}) (*corev1.Pod, bool) {
 	if pod, ok := obj.(*corev1.Pod); ok {
-		return pod, true
+		return pod, pod != nil
 	}
 
 	tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
@@ -44,7 +58,7 @@ func podFromDeletedObject(obj interface{}) (*corev1.Pod, bool) {
 		return nil, false
 	}
 	pod, ok := tombstone.Obj.(*corev1.Pod)
-	return pod, ok
+	return pod, ok && pod != nil
 }
 
 func (o *Observer) handlePodAdd(p *corev1.Pod) {
@@ -61,4 +75,11 @@ func (o *Observer) handlePodDelete(p *corev1.Pod) {
 
 func describePod(p *corev1.Pod) string {
 	return fmt.Sprintf("%s/%s (Phase: %s)", p.Namespace, p.Name, p.Status.Phase)
+}
+
+func logCrashLoopDetections(oldPod, pod *corev1.Pod) {
+	for _, containerName := range crashBackLoopDetected(oldPod, pod) {
+		description := fmt.Sprintf("%s/%s container=%s", pod.Namespace, pod.Name, containerName)
+		logResource("Detected", "CrashLoopBackOff", description)
+	}
 }
