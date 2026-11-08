@@ -1,12 +1,16 @@
 package observer
 
 import (
+	"context"
 	"fmt"
+	"time"
+
+	"github.com/Darkpenguin1/k8-observer/internal/investigation"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/cache"
 )
 
-func (o *Observer) registerPodInformer() (informerRegistration, error) {
+func (o *Observer) registerPodInformer(ctx context.Context) (informerRegistration, error) {
 	informer := o.factory.Core().V1().Pods().Informer()
 
 	// whole lotta type assertions
@@ -18,7 +22,7 @@ func (o *Observer) registerPodInformer() (informerRegistration, error) {
 				return
 			}
 
-			logCrashLoopDetections(nil, pod)
+			o.logCrashLoopDetections(ctx, nil, pod)
 
 			o.handlePodAdd(pod)
 
@@ -32,7 +36,7 @@ func (o *Observer) registerPodInformer() (informerRegistration, error) {
 				return
 			}
 
-			logCrashLoopDetections(oldPod, pod)
+			o.logCrashLoopDetections(ctx, oldPod, pod)
 
 			o.handlePodUpdate(pod)
 
@@ -77,8 +81,23 @@ func describePod(p *corev1.Pod) string {
 	return fmt.Sprintf("%s/%s (Phase: %s)", p.Namespace, p.Name, p.Status.Phase)
 }
 
-func logCrashLoopDetections(oldPod, pod *corev1.Pod) {
+func (o *Observer) logCrashLoopDetections(ctx context.Context, oldPod, pod *corev1.Pod) {
 	for _, containerName := range crashBackLoopDetected(oldPod, pod) {
+		detection := investigation.Detection{
+			Key: investigation.Key{
+				PodUID:        pod.UID,
+				ContainerName: containerName,
+				Reason:        "CrashLoopBackOff",
+			},
+			Namespace:  pod.Namespace,
+			PodName:    pod.Name,
+			ObservedAt: time.Now(),
+		}
+		if err := o.scheduler.Submit(ctx, detection); err != nil {
+			logResource("Failed", "CrashLoopBackOff detection", err.Error())
+			continue
+		}
+
 		description := fmt.Sprintf("%s/%s container=%s", pod.Namespace, pod.Name, containerName)
 		logResource("Detected", "CrashLoopBackOff", description)
 	}
